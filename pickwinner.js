@@ -31,31 +31,48 @@ var datastore = {};
 
 router.get("/", function (req, res) {
 
-    // [PENDING] Check authentication header
-    //%WeAreG33Ks!
-    let authorized = true;
-    if (!authorized) {
-        debug("authentication failed");
+    // Check Authentication
+    const authHeader = req.get("Authorization");
+    if (!authHeader) {
+        debug("authentication failed: no Authorization heder");
         return sendError(res, 401, "authentication failed", "please place your API token in the 'Authorization' HTTP header with a 'Bearer' prefix");
+    }
+    // Extract token
+    const splitted = authHeader.match(/^Bearer\s([0-9a-zA-Z]*)$/);
+    if (!splitted || (splitted.length != 2)) {
+        debug("authentication header does not match 'Bearer [0-9a-zA-Z]*' pattern");
+        return sendError(res, 401, "authentication header does not match 'Bearer [0-9a-zA-Z]*' pattern");
+    }
+    // Check token
+    const token = splitted[1];
+    const authcode = process.env.API_SECRET || "ObjectIsAdvantag";
+    if (token !== authcode) {
+        debug("authentication token failed, token did not match");
+        return sendError(res, 401, "authentication failed, bad token");
     }
     debug('authentication ok');
 
     // Check query parameters
     // Mandatory parameter: challenge
-    var challenge = req.query["challenge"];
+    const challenge = req.query["challenge"];
     if (!challenge) {
         debug("challenge not specified");
-        return sendError(res, 403, "answer not specified", "please specify the answer to the challenge as a 'answer' query parameter");
+        return sendError(res, 400, "answer not specified", "please specify the answer to the challenge as a 'answer' query parameter");
     }
     debug(`found challenge: ${challenge}`);
 
     // Mandatory parameter: answer
-    var answer = req.query["answer"];
+    const answer = req.query["answer"];
     if (!answer) {
         debug("answer not specified");
-        return sendError(res, 403, "answer not found", "please specify the answer to the challenge as a 'answer' query parameter");
+        return sendError(res, 400, "answer not found", "please specify the answer to the challenge as a 'answer' query parameter");
     }
-    debug(`computing winners for actual answer: ${answer}`);
+    const answerAsFloat = parseFloat(answer);
+    if (!answerAsFloat) {
+        debug("cannot parse answer as a float!");
+        return sendError(res, 400, "answer is not a float", "please specify the answer to the challenge as a float number, formatted as 'X.YZ'");
+    }
+    debug(`computing winners for actual answer: ${answerAsFloat}`);
 
     // Optional number of winners to display : defaults to 10
     var top = parseInt(req.query["top"]);
@@ -65,30 +82,15 @@ router.get("/", function (req, res) {
     debug(`will fetch top: ${top} winners`);
 
     // Pick winner
-    pickWinners(challenge, answer, top, function (err, result) {
+    computeChallenge(challenge, answerAsFloat, top, function (err, result) {
         if (err) {
             debug(`error while picking winners: ${err.message}`);
-            return sendError(res, 400, { message: err.message });
+            return sendError(res, 500, { message: err.message });
         }
 
-        return sendSuccess(res, 200, {
-            "submissions": {
-                "total": 100,
-                "invalid": 5,
-                "deduped": 82
-            },
-            "winners": [
-                {
-                    "firstName": "Stève",
-                    "lastName": "Sfartz",
-                    "fullName": "Stève Sfartz",
-                    "guess": 12346,
-                    "submittedAt": "DATE"
-                }
-            ]
-        });
+        return sendSuccess(res, 200, result);
     });
-});
+})
 
 module.exports = router;
 
@@ -98,10 +100,10 @@ module.exports = router;
 //    - filter on the challenge
 //    - sanitize entries (remove invalid, and deduplicate)
 //    - pick winner
-const smartsheet = require('./smartsheet.js');
-function pickWinners(challenge, answer, top, cb) {
+function computeChallenge(challenge, answer, top, cb) {
 
     // Fetch rows
+    const smartsheet = require('./smartsheet.js');
     smartsheet.fetch(process.env.SMARTSHEET_TOKEN, process.env.SMARTSHEET_ID, true, (err, smartsheet) => {
         if (err) {
             debug(`error while fetching smartsheet, err: ${err.message}`);
@@ -172,12 +174,21 @@ function pickWinners(challenge, answer, top, cb) {
             // add entry
             sanitized[elem.profile] = elem;
         });
-        debug(`after sanitizing: total of ${ Object.keys(sanitized).length} submissions, ignored: ${ignored} submissions`);
+        debug(`after sanitizing: total of ${Object.keys(sanitized).length} submissions, ignored: ${ignored} submissions`);
 
         // Pick winner
-
+        const challenges = JSON.parse(require('fs').readFileSync('./challenges.json', 'utf8'));
+        const beganAt = challenges[challenge].begin;
+        const winners = pickWinner(sanitized, answer, beganAt, top);
+        if (cb) cb(null, {
+            "submissions": {
+                "total": filtered.length,
+                "ignored": ignored,
+                "competing": Object.keys(sanitized).length
+            },
+            "winners": winners
+        });
     });
-
 }
 
 // Map a raw row to a challenge row
@@ -201,35 +212,36 @@ function mapRow(elem) {
     }
 }
 
-
-function sort() {
+function pickWinner(submissions, answer, beganAt, top) {
     // Add a score to each answer
-    var scored = answers.map(function (elem) {
+    let scored = [];
+    Object.keys(submissions).forEach(function (key) {
+        let elem = submissions[key];
+
         // Integer part of the score is the proximity to the answer
-        elem.score = Math.abs(elem.data.weight - weight);
+        let score = Math.round(Math.abs(elem.confirmed - answer) * 100);
 
         // Floating part of the scoreis the proximity to the challenge start
-        var seconds = new Date(elem.createdAt).getTime() - new Date(challenge.begin).getTime();
+        var seconds = Math.abs((new Date(elem.submittedAt).getTime() - new Date(beganAt).getTime()) / 1000);
         if (seconds < 0) {
-            debug(`unexpected answer from ${elem.submitter.devnetId}, submitted before challenge began: ${challenge.id}}`);
-            elem.score = 100000;
+            debug(`unexpected answer from ${elem.fullName}, submitted before challenge began`);
+            // Set score to cannot win
+            elem.score = 999999999;
         }
         else {
-            elem.score = parseFloat("" + elem.score + "." + seconds);
+            elem.score = parseFloat(`${score}.${seconds}`);
         }
 
-        return elem;
+        scored.push(elem);
     });
 
-    // Sort by score
+    // Sort by score (lowest to highest)
     var sorted = scored.sort(function (answer1, answer2) {
-        return (answer2 - answer1);
+        return (answer1.score - answer2.score);
     });
 
-    // Return first max answers
-    if (max) {
-        sorted = sorted.slice(0, max);
-    }
+    // Return 'top' first answers
+    sorted = sorted.slice(0, top);
 
     return sorted;
 }

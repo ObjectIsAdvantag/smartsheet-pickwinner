@@ -7,16 +7,6 @@
 const debug = require("debug")("api");
 const express = require("express");
 
-
-
-//
-// Setting up common services 
-//
-const app = express();
-
-// Inject in-memory data store for static / non persisted resources
-app.locals.datastore = {};
-
 // Check smartsheet info are provided
 if (!process.env.SMARTSHEET_TOKEN) {
     console.log("Please specify a SmartSheet API token as a SMARTSHEET_TOKEN env variable. Exiting...");
@@ -35,6 +25,16 @@ smartsheet.fetch(process.env.SMARTSHEET_TOKEN, process.env.SMARTSHEET_ID, false,
 
     debug(`all good, could find the smartsheet: ${smartsheet.name}`)
 });
+
+
+//
+// Setting up common services 
+//
+const app = express();
+
+// Inject in-memory data store for static / non persisted resources
+app.locals.datastore = {};
+
 
 //
 // Technical headers, middleware
