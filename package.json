@@ -1,6 +1,6 @@
 {
   "name": "smartsheet-pickwinner",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "REST API to pick a winner from a challenge run on a SmartSheet backend.",
   "main": "server.js",
   "scripts": {

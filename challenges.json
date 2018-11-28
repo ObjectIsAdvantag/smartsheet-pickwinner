@@ -1,14 +1,14 @@
 {
-    "kilograms": {
+    "default": {
         "event": "DevNet Tests",
-        "begin": "2018-11-25T08:00:00Z"  
+        "begin": "2018-11-28T07:00:00Z"  
     },
     "day1": {
         "event": "CodeMotion Milan",
-        "begin": "2018-11-29T08:00:00Z"   
+        "begin": "2018-11-29T07:00:00Z"   
     },
     "day2": {
         "event": "CodeMotion Milan",
-        "begin": "2018-11-30T08:00:00Z"   
+        "begin": "2018-11-30T07:00:00Z"   
     }
 }

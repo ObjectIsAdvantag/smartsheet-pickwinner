@@ -178,7 +178,16 @@ function computeChallenge(challenge, answer, top, cb) {
 
         // Pick winner
         const challenges = JSON.parse(require('fs').readFileSync('./challenges.json', 'utf8'));
-        const beganAt = challenges[challenge].begin;
+
+        // Look for the challenge start time
+        let beganAt;
+        if (challenges[challenge]) {
+            beganAt = challenges[challenge].begin;
+        }
+        else {
+            beganAt = challenges["default"].begin;
+        } 
+
         const winners = pickWinner(sanitized, answer, beganAt, top);
         if (cb) cb(null, {
             "submissions": {
